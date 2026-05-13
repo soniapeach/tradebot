@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeBot Dashboard</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500&display=swap');
+  *{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0a0c10;--bg2:#111418;--bg3:#181c22;--border:#ffffff0f;
+    --text:#e8eaf0;--muted:#6b7280;--dim:#3a3f4a;
+    --green:#00e5a0;--red:#ff4d6a;--amber:#f5a623;--blue:#4d9fff;
+    --font-mono:'Space Mono',monospace;--font:'DM Sans',sans-serif;
+  }
+  body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:13px}
+  body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,#ffffff02 2px,#ffffff02 4px);pointer-events:none;z-index:0}
+  .root{position:relative;z-index:1;padding:16px;max-width:960px;margin:0 auto}
+
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--border)}
+  .logo{font-family:var(--font-mono);font-size:15px;font-weight:700;color:var(--green)}
+  .logo span{color:var(--muted)}
+  .hdr-right{display:flex;align-items:center;gap:14px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s ease-in-out infinite;display:inline-block;margin-right:5px}
+  .dot.red{background:var(--red);animation:none}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 0 #00e5a055}50%{box-shadow:0 0 0 5px #00e5a000}}
+  .paper-badge{background:#f5a62320;color:var(--amber);border:1px solid #f5a62340;padding:3px 10px;border-radius:20px;font-size:10px;font-family:var(--font-mono);font-weight:700;letter-spacing:.05em}
+
+  .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
+  .kpi{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;position:relative;overflow:hidden}
+  .kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+  .kpi.g::before{background:var(--green)}.kpi.r::before{background:var(--red)}
+  .kpi.a::before{background:var(--amber)}.kpi.b::before{background:var(--blue)}
+  .kpi-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+  .kpi-value{font-family:var(--font-mono);font-size:20px;font-weight:700;line-height:1}
+  .kpi-sub{font-size:11px;color:var(--muted);margin-top:4px}
+  .green{color:var(--green)}.red{color:var(--red)}.amber{color:var(--amber)}.blue{color:var(--blue)}
+
+  .grid2{display:grid;grid-template-columns:1fr 280px;gap:12px;margin-bottom:12px}
+  .panel{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+  .ph{display:flex;align-items:center;justify-content:space-between;padding:11px 16px;border-bottom:1px solid var(--border)}
+  .pt{font-family:var(--font-mono);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+  .pb{padding:14px 16px}
+
+  table{width:100%;border-collapse:collapse}
+  th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);padding:6px 8px;text-align:left;border-bottom:1px solid var(--border)}
+  td{padding:8px 8px;border-bottom:1px solid var(--border);font-family:var(--font-mono);font-size:12px}
+  tr:last-child td{border-bottom:none}
+  .badge{display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700}
+  .badge.long{background:#00e5a018;color:var(--green);border:1px solid #00e5a035}
+  .badge.short{background:#ff4d6a18;color:var(--red);border:1px solid #ff4d6a35}
+  .badge.buy{background:#00e5a018;color:var(--green);border:1px solid #00e5a035}
+  .badge.sell{background:#ff4d6a18;color:var(--red);border:1px solid #ff4d6a35}
+  .badge.close{background:#f5a62318;color:var(--amber);border:1px solid #f5a62335}
+
+  .feed{display:flex;flex-direction:column;gap:7px;max-height:360px;overflow-y:auto}
+  .feed::-webkit-scrollbar{width:3px}
+  .feed::-webkit-scrollbar-thumb{background:var(--dim);border-radius:2px}
+  .sig{background:var(--bg3);border:1px solid var(--border);border-left:3px solid var(--dim);border-radius:8px;padding:9px 12px}
+  .sig.BUY{border-left-color:var(--green)}.sig.SELL{border-left-color:var(--red)}.sig.CLOSE{border-left-color:var(--amber)}
+  .sig-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:3px}
+  .sig-pair{font-family:var(--font-mono);font-weight:700;font-size:12px}
+  .sig-time{font-size:10px;color:var(--dim)}
+  .sig-info{font-size:11px;color:var(--muted)}
+
+  .bottom-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .hist-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
+  .hist-row:last-child{border-bottom:none}
+  .hist-icon{width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;font-family:var(--font-mono)}
+  .hist-icon.w{background:#00e5a018;color:var(--green)}.hist-icon.l{background:#ff4d6a18;color:var(--red)}
+  .hist-info{flex:1}
+  .hist-pair{font-family:var(--font-mono);font-size:12px;font-weight:700}
+  .hist-meta{font-size:10px;color:var(--muted);margin-top:1px}
+  .hist-pnl{font-family:var(--font-mono);font-size:13px;font-weight:700}
+
+  .empty{color:var(--dim);font-size:12px;text-align:center;padding:20px;font-family:var(--font-mono)}
+
+  .webhook-box{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-top:12px}
+  .webhook-url{font-family:var(--font-mono);font-size:11px;color:var(--green);word-break:break-all}
+  .webhook-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px}
+
+  .err-row{font-size:11px;color:var(--red);font-family:var(--font-mono);padding:4px 0;border-bottom:1px solid var(--border)}
+  .err-row:last-child{border-bottom:none}
+
+  @media(max-width:600px){.kpi-row{grid-template-columns:1fr 1fr}.grid2,.bottom-row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="root">
+  <header>
+    <div class="logo">TRADE<span>/</span>BOT</div>
+    <div class="hdr-right">
+      <span id="paper-badge" class="paper-badge" style="display:none">PAPER TRADING</span>
+      <span><span class="dot" id="status-dot"></span><span id="status-text" style="font-size:11px;color:var(--muted)">a ligar...</span></span>
+      <span id="clock" style="font-family:var(--font-mono);font-size:11px;color:var(--dim)">--:--:--</span>
+    </div>
+  </header>
+
+  <!-- KPIs -->
+  <div class="kpi-row">
+    <div class="kpi g">
+      <div class="kpi-label">P&L Total</div>
+      <div class="kpi-value green" id="kpi-pnl">$0.00</div>
+      <div class="kpi-sub" id="kpi-balance">saldo: —</div>
+    </div>
+    <div class="kpi b">
+      <div class="kpi-label">Posições abertas</div>
+      <div class="kpi-value blue" id="kpi-positions">0</div>
+      <div class="kpi-sub" id="kpi-pos-sub">nenhuma</div>
+    </div>
+    <div class="kpi a">
+      <div class="kpi-label">Sinais recebidos</div>
+      <div class="kpi-value amber" id="kpi-signals">0</div>
+      <div class="kpi-sub">desde o arranque</div>
+    </div>
+    <div class="kpi r">
+      <div class="kpi-label">Trades executados</div>
+      <div class="kpi-value" id="kpi-trades">0</div>
+      <div class="kpi-sub">total</div>
+    </div>
+  </div>
+
+  <!-- Main grid -->
+  <div class="grid2">
+    <div style="display:flex;flex-direction:column;gap:12px">
+
+      <!-- Posições abertas -->
+      <div class="panel">
+        <div class="ph">
+          <span class="pt">Posições abertas</span>
+          <span style="font-size:10px;color:var(--green)" id="pos-live">● live</span>
+        </div>
+        <div style="padding:0 6px" id="positions-wrap">
+          <div class="empty">nenhuma posição aberta</div>
+        </div>
+      </div>
+
+      <!-- Últimos trades -->
+      <div class="panel">
+        <div class="ph">
+          <span class="pt">Trades executados</span>
+          <span style="font-size:10px;color:var(--muted)" id="trades-count">0 trades</span>
+        </div>
+        <div style="padding:0 6px" id="trades-wrap">
+          <div class="empty">sem trades ainda</div>
+        </div>
+      </div>
+
+      <!-- Erros -->
+      <div class="panel" id="errors-panel" style="display:none">
+        <div class="ph"><span class="pt" style="color:var(--red)">Erros recentes</span></div>
+        <div class="pb" id="errors-wrap"></div>
+      </div>
+
+    </div>
+
+    <!-- Feed de sinais -->
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="panel">
+        <div class="ph">
+          <span class="pt">Feed de sinais</span>
+          <span style="font-size:10px;color:var(--muted)">TradingView webhook</span>
+        </div>
+        <div class="pb">
+          <div class="feed" id="signal-feed">
+            <div class="empty">à espera de sinais...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- URL do webhook -->
+      <div class="panel">
+        <div class="ph"><span class="pt">Configuração webhook</span></div>
+        <div class="pb">
+          <div class="webhook-label">URL para o TradingView</div>
+          <div class="webhook-url" id="webhook-url">—</div>
+          <div style="margin-top:12px;font-size:11px;color:var(--muted);line-height:1.6">
+            Formato do alerta (JSON):<br>
+            <code style="color:var(--green);font-size:10px">
+              {"secret":"WEBHOOK_SECRET",<br>
+              "symbol":"BTC/USDT",<br>
+              "action":"BUY",<br>
+              "price":{{close}},<br>
+              "size_usd":50}
+            </code>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const BASE = window.location.origin;
+let signals_seen = 0;
+
+// Clock
+setInterval(() => {
+  document.getElementById('clock').textContent = new Date().toTimeString().slice(0,8);
+}, 1000);
+
+// Webhook URL
+document.getElementById('webhook-url').textContent = BASE + '/webhook';
+
+// Formata timestamp
+function fmtTs(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleTimeString('pt-PT', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+
+// Fetch status
+async function fetchStatus() {
+  try {
+    const r = await fetch(BASE + '/api/status');
+    const d = await r.json();
+
+    document.getElementById('status-dot').className = 'dot';
+    document.getElementById('status-text').textContent = 'Binance ' + (d.paper_trading ? 'Testnet' : 'Mainnet');
+
+    if (d.paper_trading) {
+      document.getElementById('paper-badge').style.display = 'inline';
+    }
+
+    const pnl = d.total_pnl || 0;
+    document.getElementById('kpi-pnl').textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
+    document.getElementById('kpi-pnl').className = 'kpi-value ' + (pnl >= 0 ? 'green' : 'red');
+    document.getElementById('kpi-balance').textContent = 'saldo: $' + (d.balance_usdt || 0).toFixed(2);
+    document.getElementById('kpi-positions').textContent = d.open_positions || 0;
+    document.getElementById('kpi-trades').textContent = d.total_trades || 0;
+
+    // Erros
+    if (d.errors && d.errors.length > 0) {
+      document.getElementById('errors-panel').style.display = 'block';
+      document.getElementById('errors-wrap').innerHTML = d.errors.map(e =>
+        `<div class="err-row">${fmtTs(e.ts)} — ${e.msg}</div>`
+      ).join('');
+    }
+  } catch(e) {
+    document.getElementById('status-dot').className = 'dot red';
+    document.getElementById('status-text').textContent = 'offline';
+  }
+}
+
+// Fetch positions
+async function fetchPositions() {
+  try {
+    const r = await fetch(BASE + '/api/positions');
+    const positions = await r.json();
+
+    const wrap = document.getElementById('positions-wrap');
+    document.getElementById('kpi-positions').textContent = positions.length;
+
+    if (!positions.length) {
+      wrap.innerHTML = '<div class="empty">nenhuma posição aberta</div>';
+      document.getElementById('kpi-pos-sub').textContent = 'nenhuma';
+      return;
+    }
+
+    const longs = positions.filter(p => p.side === 'BUY').length;
+    const shorts = positions.filter(p => p.side === 'SELL').length;
+    document.getElementById('kpi-pos-sub').textContent = `${longs} long · ${shorts} short`;
+
+    wrap.innerHTML = `<table>
+      <thead><tr><th>Par</th><th>Tipo</th><th>Entrada</th><th>Actual</th><th>P&L</th><th>Tamanho</th></tr></thead>
+      <tbody>${positions.map(p => {
+        const pos = (p.pnl || 0) >= 0;
+        return `<tr>
+          <td style="font-weight:700">${p.symbol}</td>
+          <td><span class="badge ${p.side === 'BUY' ? 'long' : 'short'}">${p.side === 'BUY' ? 'LONG' : 'SHORT'}</span></td>
+          <td>${(p.entry_price || 0).toLocaleString()}</td>
+          <td style="color:${pos?'var(--green)':'var(--red)'}">${(p.current_price || 0).toLocaleString()}</td>
+          <td style="color:${pos?'var(--green)':'var(--red)'}">${pos?'+':''}$${(p.pnl||0).toFixed(2)}</td>
+          <td>$${p.size_usd}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  } catch(e) { console.error('positions:', e); }
+}
+
+// Fetch signals
+async function fetchSignals() {
+  try {
+    const r = await fetch(BASE + '/api/signals');
+    const signals = await r.json();
+
+    document.getElementById('kpi-signals').textContent = signals.length;
+    const feed = document.getElementById('signal-feed');
+
+    if (!signals.length) {
+      feed.innerHTML = '<div class="empty">à espera de sinais...</div>';
+      return;
+    }
+
+    feed.innerHTML = signals.slice(0, 15).map(s => `
+      <div class="sig ${s.action}">
+        <div class="sig-h">
+          <span class="sig-pair">${s.symbol} <span class="badge ${s.action.toLowerCase()}">${s.action}</span></span>
+          <span class="sig-time">${fmtTs(s.received_at)}</span>
+        </div>
+        <div class="sig-info">${s.strategy || 'manual'} · $${s.price ? Number(s.price).toLocaleString() : '—'}</div>
+      </div>`).join('');
+  } catch(e) { console.error('signals:', e); }
+}
+
+// Fetch trades
+async function fetchTrades() {
+  try {
+    const r = await fetch(BASE + '/api/trades');
+    const trades = await r.json();
+
+    document.getElementById('trades-count').textContent = `${trades.length} trades`;
+    const wrap = document.getElementById('trades-wrap');
+
+    if (!trades.length) {
+      wrap.innerHTML = '<div class="empty">sem trades ainda</div>';
+      return;
+    }
+
+    wrap.innerHTML = trades.slice(0, 10).map(t => {
+      const win = (t.pnl || 0) >= 0;
+      return `<div class="hist-row">
+        <div class="hist-icon ${win?'w':'l'}">${t.side === 'BUY' ? 'L' : t.side === 'SELL' ? 'S' : 'C'}</div>
+        <div class="hist-info">
+          <div class="hist-pair">${t.symbol} <span style="color:var(--dim);font-size:10px;font-weight:400">${t.side}</span></div>
+          <div class="hist-meta">${fmtTs(t.timestamp)} · $${t.price ? Number(t.price).toLocaleString() : '—'}</div>
+        </div>
+        <div class="hist-pnl ${win?'green':'red'}">${win?'+':''}$${(t.pnl||0).toFixed(2)}</div>
+      </div>`;
+    }).join('');
+  } catch(e) { console.error('trades:', e); }
+}
+
+// Polling
+async function refresh() {
+  await Promise.all([fetchStatus(), fetchPositions(), fetchSignals(), fetchTrades()]);
+}
+
+refresh();
+setInterval(refresh, 3000); // actualiza a cada 3 segundos
+</script>
+</body>
+</html>

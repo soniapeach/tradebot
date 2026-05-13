@@ -1,0 +1,36 @@
+//@version=5
+strategy("TradeBot — EMA Cross", overlay=true, default_qty_type=strategy.fixed, default_qty_value=1)
+
+// ── Parâmetros ─────────────────────────────────────────────────────────────
+ema_fast = input.int(9,  "EMA rápida")
+ema_slow = input.int(21, "EMA lenta")
+webhook_secret = input.string("muda_este_secret", "Webhook Secret")
+size_usd       = input.float(50, "Tamanho da posição (USDT)")
+
+// ── Indicadores ────────────────────────────────────────────────────────────
+fast = ta.ema(close, ema_fast)
+slow = ta.ema(close, ema_slow)
+
+plot(fast, "EMA " + str.tostring(ema_fast), color.new(color.green, 0), 2)
+plot(slow, "EMA " + str.tostring(ema_slow), color.new(color.red, 0), 2)
+
+// ── Sinais ─────────────────────────────────────────────────────────────────
+cross_up   = ta.crossover(fast, slow)
+cross_down = ta.crossunder(fast, slow)
+
+// ── Mensagem JSON para o webhook ───────────────────────────────────────────
+// {{ticker}}, {{close}}, {{time}} são variáveis do TradingView
+buy_msg  = '{"secret":"' + webhook_secret + '","symbol":"' + syminfo.ticker + '","action":"BUY","price":' + str.tostring(close) + ',"size_usd":' + str.tostring(size_usd) + ',"strategy":"EMA Cross ' + str.tostring(ema_fast) + '/' + str.tostring(ema_slow) + '"}'
+sell_msg = '{"secret":"' + webhook_secret + '","symbol":"' + syminfo.ticker + '","action":"SELL","price":' + str.tostring(close) + ',"size_usd":' + str.tostring(size_usd) + ',"strategy":"EMA Cross ' + str.tostring(ema_fast) + '/' + str.tostring(ema_slow) + '"}'
+close_msg = '{"secret":"' + webhook_secret + '","symbol":"' + syminfo.ticker + '","action":"CLOSE","price":' + str.tostring(close) + ',"strategy":"EMA Cross"}'
+
+// ── Execução ───────────────────────────────────────────────────────────────
+if cross_up
+    strategy.entry("Long", strategy.long, alert_message=buy_msg)
+
+if cross_down
+    strategy.entry("Short", strategy.short, alert_message=sell_msg)
+
+// ── Alertas (configura no TradingView com a URL do teu bot) ────────────────
+alertcondition(cross_up,   "BUY Signal",  buy_msg)
+alertcondition(cross_down, "SELL Signal", sell_msg)
