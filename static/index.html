@@ -26,6 +26,17 @@
   @keyframes pulse{0%,100%{box-shadow:0 0 0 0 #00e5a055}50%{box-shadow:0 0 0 5px #00e5a000}}
   .paper-badge{background:#f5a62320;color:var(--amber);border:1px solid #f5a62340;padding:3px 10px;border-radius:20px;font-size:10px;font-family:var(--font-mono);font-weight:700;letter-spacing:.05em}
 
+  /* Ticker bar */
+  .ticker-bar{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 16px;margin-bottom:14px;display:flex;align-items:center;gap:24px;overflow-x:auto;scrollbar-width:none}
+  .ticker-bar::-webkit-scrollbar{display:none}
+  .ticker-item{display:flex;align-items:center;gap:10px;flex-shrink:0}
+  .ticker-sep{width:1px;height:24px;background:var(--border);flex-shrink:0}
+  .ticker-symbol{font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--muted);letter-spacing:.05em}
+  .ticker-price{font-family:var(--font-mono);font-size:13px;font-weight:700}
+  .ticker-change{font-size:10px;padding:2px 6px;border-radius:4px;font-family:var(--font-mono);font-weight:700}
+  .ticker-change.up{background:#00e5a015;color:var(--green)}
+  .ticker-change.dn{background:#ff4d6a15;color:var(--red)}
+
   .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
   .kpi{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;position:relative;overflow:hidden}
   .kpi::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
@@ -95,6 +106,19 @@
       <span id="clock" style="font-family:var(--font-mono);font-size:11px;color:var(--dim)">--:--:--</span>
     </div>
   </header>
+
+  <!-- Ticker bar -->
+  <div class="ticker-bar">
+    <div class="ticker-item"><span class="ticker-symbol">BTC</span><span class="ticker-price" id="t-btc">—</span><span class="ticker-change" id="tc-btc">—</span></div>
+    <div class="ticker-sep"></div>
+    <div class="ticker-item"><span class="ticker-symbol">ETH</span><span class="ticker-price" id="t-eth">—</span><span class="ticker-change" id="tc-eth">—</span></div>
+    <div class="ticker-sep"></div>
+    <div class="ticker-item"><span class="ticker-symbol">SOL</span><span class="ticker-price" id="t-sol">—</span><span class="ticker-change" id="tc-sol">—</span></div>
+    <div class="ticker-sep"></div>
+    <div class="ticker-item"><span class="ticker-symbol">EUR/USD</span><span class="ticker-price" id="t-eur">—</span><span class="ticker-change" id="tc-eur">—</span></div>
+    <div class="ticker-sep"></div>
+    <div class="ticker-item"><span class="ticker-symbol">GBP/USD</span><span class="ticker-price" id="t-gbp">—</span><span class="ticker-change" id="tc-gbp">—</span></div>
+  </div>
 
   <!-- KPIs -->
   <div class="kpi-row">
@@ -332,13 +356,60 @@ async function fetchTrades() {
   } catch(e) { console.error('trades:', e); }
 }
 
+// ── Ticker bar ─────────────────────────────────────────
+const tickerPrev = {};
+
+function setTicker(id, price, change) {
+  const el = document.getElementById('t-' + id);
+  const cel = document.getElementById('tc-' + id);
+  if (!el || !cel) return;
+  const fmt = price < 10 ? price.toFixed(4) : price < 1000 ? price.toFixed(2) : price.toLocaleString('en-US', {maximumFractionDigits: 0});
+  el.textContent = price < 10 ? fmt : '$' + fmt;
+  const up = change >= 0;
+  cel.textContent = (up ? '+' : '') + change.toFixed(2) + '%';
+  cel.className = 'ticker-change ' + (up ? 'up' : 'dn');
+}
+
+async function fetchTicker() {
+  try {
+    // Cripto via Bitget public API
+    const cryptos = [
+      {id: 'btc', symbol: 'BTCUSDT'},
+      {id: 'eth', symbol: 'ETHUSDT'},
+      {id: 'sol', symbol: 'SOLUSDT'},
+    ];
+    for (const c of cryptos) {
+      const r = await fetch(`https://api.bitget.com/api/v2/mix/market/ticker?symbol=${c.symbol}&productType=USDT-FUTURES`);
+      const d = await r.json();
+      if (d.code === '00000' && d.data?.length) {
+        const price  = parseFloat(d.data[0].lastPr);
+        const open   = parseFloat(d.data[0].openUtc0 || d.data[0].open24h || price);
+        const change = open ? ((price - open) / open * 100) : 0;
+        setTicker(c.id, price, change);
+      }
+    }
+    // EUR/USD e GBP/USD via API pública gratuita
+    const fx = await fetch('https://open.er-api.com/v6/latest/USD');
+    const fxd = await fx.json();
+    if (fxd.rates) {
+      const eur = 1 / fxd.rates.EUR;
+      const gbp = 1 / fxd.rates.GBP;
+      setTicker('eur', eur, 0);
+      setTicker('gbp', gbp, 0);
+    }
+  } catch(e) { console.error('ticker:', e); }
+}
+
+fetchTicker();
+setInterval(fetchTicker, 15000); // actualiza a cada 15 segundos
+
 // Polling
 async function refresh() {
   await Promise.all([fetchStatus(), fetchPositions(), fetchSignals(), fetchTrades()]);
 }
 
 refresh();
-setInterval(refresh, 3000); // actualiza a cada 3 segundos
+setInterval(refresh, 3000);
 </script>
 </body>
 </html>
