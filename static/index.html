@@ -241,7 +241,7 @@ async function fetchStatus() {
     const d = await r.json();
 
     document.getElementById('status-dot').className = 'dot';
-    document.getElementById('status-text').textContent = 'Binance ' + (d.paper_trading ? 'Testnet' : 'Mainnet');
+    document.getElementById('status-text').textContent = 'Bitget  ' + (d.paper_trading ? 'Testnet' : 'Mainnet');
 
     if (d.paper_trading) {
       document.getElementById('paper-badge').style.display = 'inline';
