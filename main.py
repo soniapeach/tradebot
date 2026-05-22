@@ -2,7 +2,7 @@
 TradeBot - Servidor principal
 Recebe webhooks do TradingView, executa ordens na Bitget, serve o dashboard
 """
-
+ 
 import os
 import json
 import hmac
@@ -13,21 +13,23 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 from contextlib import asynccontextmanager
-
+ 
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+import asyncio
 import httpx
 import uvicorn
-
+from signals import run_signal_loop
+ 
 # ── Logging ────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 log = logging.getLogger("tradebot")
-
+ 
 # ── Config ─────────────────────────────────────────────────────────────────
 BITGET_API_KEY     = os.getenv("BITGET_API_KEY", "")
 BITGET_API_SECRET  = os.getenv("BITGET_API_SECRET", "")
@@ -36,9 +38,9 @@ WEBHOOK_SECRET     = os.getenv("WEBHOOK_SECRET", "muda_este_secret")
 PAPER_TRADING      = os.getenv("PAPER_TRADING", "true").lower() == "true"
 MAX_POSITION_USDT  = float(os.getenv("MAX_POSITION_USDT", "50"))
 MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "5"))
-
+ 
 BITGET_BASE = "https://api.bitget.com"
-
+ 
 # ── Estado em memória (substituir por SQLite em produção) ──────────────────
 state = {
     "signals": [],
@@ -50,7 +52,7 @@ state = {
     "started_at": datetime.now(timezone.utc).isoformat(),
     "errors": [],
 }
-
+ 
 # ── Bitget helpers ─────────────────────────────────────────────────────────
 def _bitget_sign(timestamp: str, method: str, path: str, body: str = "") -> str:
     message = timestamp + method.upper() + path + body
@@ -60,7 +62,7 @@ def _bitget_sign(timestamp: str, method: str, path: str, body: str = "") -> str:
         hashlib.sha256
     ).digest()
     return base64.b64encode(signature).decode()
-
+ 
 def _bitget_headers(method: str, path: str, body: str = "") -> dict:
     timestamp = str(int(time.time() * 1000))
     return {
@@ -70,7 +72,7 @@ def _bitget_headers(method: str, path: str, body: str = "") -> dict:
         "ACCESS-PASSPHRASE": BITGET_PASSPHRASE,
         "Content-Type": "application/json",
     }
-
+ 
 async def bitget_get(path: str, params: dict = None) -> dict:
     query = ""
     if params:
@@ -80,7 +82,7 @@ async def bitget_get(path: str, params: dict = None) -> dict:
         r = await client.get(f"{BITGET_BASE}{path}", params=params, headers=headers, timeout=10)
         r.raise_for_status()
         return r.json()
-
+ 
 async def bitget_post(path: str, body: dict) -> dict:
     body_str = json.dumps(body)
     headers = _bitget_headers("POST", path, body_str)
@@ -88,12 +90,12 @@ async def bitget_post(path: str, body: dict) -> dict:
         r = await client.post(f"{BITGET_BASE}{path}", content=body_str, headers=headers, timeout=10)
         r.raise_for_status()
         return r.json()
-
+ 
 # ── Lógica de risco ────────────────────────────────────────────────────────
 def check_risk(symbol: str, side: str, usdt_size: float) -> tuple[bool, str]:
     if usdt_size > MAX_POSITION_USDT:
         return False, f"Tamanho {usdt_size} USDT excede limite {MAX_POSITION_USDT} USDT"
-
+ 
     daily_loss = sum(
         t["pnl"] for t in state["trades"]
         if t["pnl"] < 0 and t["date"] == datetime.now().strftime("%Y-%m-%d")
@@ -102,20 +104,20 @@ def check_risk(symbol: str, side: str, usdt_size: float) -> tuple[bool, str]:
         loss_pct = abs(daily_loss) / state["balance_usdt"] * 100
         if loss_pct >= MAX_DAILY_LOSS_PCT:
             return False, f"Limite de perda diária atingido ({loss_pct:.1f}%)"
-
+ 
     if symbol in state["positions"] and state["positions"][symbol]["side"] == side:
         return False, f"Já existe posição {side} aberta em {symbol}"
-
+ 
     return True, "ok"
-
+ 
 # ── Executar ordem ─────────────────────────────────────────────────────────
 async def execute_order(signal: dict):
     symbol   = signal["symbol"].upper().replace("/", "")  # BTC/USDT → BTCUSDT
     action   = signal["action"].upper()
     size_usd = float(signal.get("size_usd", MAX_POSITION_USDT))
-
+ 
     log.info(f"Sinal recebido: {action} {symbol} ${size_usd}")
-
+ 
     if PAPER_TRADING:
         trade = {
             "id": f"paper_{int(time.time())}",
@@ -130,7 +132,7 @@ async def execute_order(signal: dict):
         }
         state["trades"].insert(0, trade)
         state["trades"] = state["trades"][:100]
-
+ 
         if action in ("BUY", "SELL"):
             state["positions"][symbol] = {
                 "symbol": symbol,
@@ -143,10 +145,10 @@ async def execute_order(signal: dict):
             }
         elif action == "CLOSE" and symbol in state["positions"]:
             del state["positions"][symbol]
-
+ 
         log.info(f"Paper trade executado: {trade}")
         return trade
-
+ 
     # Real trading
     ok, reason = check_risk(symbol, action, size_usd)
     if not ok:
@@ -154,13 +156,13 @@ async def execute_order(signal: dict):
         state["errors"].insert(0, {"msg": reason, "ts": datetime.now(timezone.utc).isoformat()})
         state["errors"] = state["errors"][:20]
         return None
-
+ 
     try:
         # Obtém preço actual
         ticker = await bitget_get(f"/api/v2/mix/market/ticker", {"symbol": symbol + "_UMCBL", "productType": "umcbl"})
         price = float(ticker["data"][0]["lastPr"])
         quantity = round(size_usd / price, 3)
-
+ 
         side_bitget = "buy" if action == "BUY" else "sell"
         result = await bitget_post("/api/v2/mix/order/place-order", {
             "symbol": symbol + "_UMCBL",
@@ -173,13 +175,13 @@ async def execute_order(signal: dict):
         })
         log.info(f"Ordem executada na Bitget: {result}")
         return result
-
+ 
     except Exception as e:
         err = f"Erro ao executar ordem {symbol}: {e}"
         log.error(err)
         state["errors"].insert(0, {"msg": err, "ts": datetime.now(timezone.utc).isoformat()})
         return None
-
+ 
 # ── Actualizar posições ─────────────────────────────────────────────────────
 async def refresh_positions():
     if not state["positions"] or PAPER_TRADING:
@@ -195,17 +197,18 @@ async def refresh_positions():
                 pos["pnl"] = round(pos["size_usd"] * pct, 2)
     except Exception as e:
         log.error(f"Erro ao actualizar posições: {e}")
-
+ 
 # ── FastAPI app ─────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info(f"TradeBot iniciado | Paper trading: {PAPER_TRADING}")
+    asyncio.create_task(run_signal_loop(state))
     yield
-
+ 
 app = FastAPI(title="TradeBot", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
+ 
 # ── Webhook do TradingView ──────────────────────────────────────────────────
 @app.post("/webhook")
 async def webhook(request: Request, background_tasks: BackgroundTasks):
@@ -213,11 +216,11 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
         body = await request.json()
     except Exception:
         raise HTTPException(400, "JSON inválido")
-
+ 
     if body.get("secret") != WEBHOOK_SECRET:
         log.warning(f"Webhook com secret inválido de {request.client.host}")
         raise HTTPException(403, "Secret inválido")
-
+ 
     signal = {
         "symbol": body.get("symbol", "???"),
         "action": body.get("action", "???"),
@@ -228,12 +231,12 @@ async def webhook(request: Request, background_tasks: BackgroundTasks):
     }
     state["signals"].insert(0, signal)
     state["signals"] = state["signals"][:50]
-
+ 
     log.info(f"Webhook recebido: {signal}")
     background_tasks.add_task(execute_order, signal)
-
+ 
     return {"status": "recebido", "signal": signal}
-
+ 
 # ── API REST para o dashboard ───────────────────────────────────────────────
 @app.get("/api/status")
 async def api_status():
@@ -248,28 +251,28 @@ async def api_status():
         "total_trades": len(state["trades"]),
         "errors": state["errors"][:5],
     }
-
+ 
 @app.get("/api/positions")
 async def api_positions():
     await refresh_positions()
     return list(state["positions"].values())
-
+ 
 @app.get("/api/signals")
 async def api_signals():
     return state["signals"]
-
+ 
 @app.get("/api/trades")
 async def api_trades():
     return state["trades"][:50]
-
+ 
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "ts": datetime.now(timezone.utc).isoformat()}
-
+ 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
     with open("static/index.html") as f:
         return f.read()
-
+ 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=False)
