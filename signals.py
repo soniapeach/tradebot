@@ -27,9 +27,9 @@ async def fetch_candles(symbol: str, limit: int = 100) -> list[dict]:
     """
     url = f"{BITGET_BASE}/api/v2/mix/market/candles"
     params = {
-        "symbol": symbol + "_UMCBL",
-        "productType": "umcbl",
-        "granularity": "60",   # 60 minutos
+        "symbol": symbol,
+        "productType": "usdt-futures",
+        "granularity": "1H",   # 60 minutos
         "limit": str(limit),
     }
     try:
