@@ -1,6 +1,6 @@
 """
 TradeBot - Servidor principal
-Recebe webhooks do TradingView, executa ordens na Bitget, serve o dashboard
+Recebe webhooks do TradingView, executa ordens na Kraken, serve o dashboard
 """
  
 import os
@@ -9,6 +9,7 @@ import hmac
 import hashlib
 import base64
 import time
+import urllib.parse
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -31,17 +32,16 @@ logging.basicConfig(
 log = logging.getLogger("tradebot")
  
 # ── Config ─────────────────────────────────────────────────────────────────
-BITGET_API_KEY     = os.getenv("BITGET_API_KEY", "")
-BITGET_API_SECRET  = os.getenv("BITGET_API_SECRET", "")
-BITGET_PASSPHRASE  = os.getenv("BITGET_PASSPHRASE", "")
+KRAKEN_API_KEY     = os.getenv("KRAKEN_API_KEY", "")
+KRAKEN_API_SECRET  = os.getenv("KRAKEN_API_SECRET", "")
 WEBHOOK_SECRET     = os.getenv("WEBHOOK_SECRET", "muda_este_secret")
 PAPER_TRADING      = os.getenv("PAPER_TRADING", "true").lower() == "true"
 MAX_POSITION_USDT  = float(os.getenv("MAX_POSITION_USDT", "50"))
 MAX_DAILY_LOSS_PCT = float(os.getenv("MAX_DAILY_LOSS_PCT", "5"))
  
-BITGET_BASE = "https://api.bitget.com"
+KRAKEN_BASE = "https://api.kraken.com"
  
-# ── Estado em memória (substituir por SQLite em produção) ──────────────────
+# ── Estado em memória ──────────────────────────────────────────────────────
 state = {
     "signals": [],
     "trades": [],
@@ -53,43 +53,62 @@ state = {
     "errors": [],
 }
  
-# ── Bitget helpers ─────────────────────────────────────────────────────────
-def _bitget_sign(timestamp: str, method: str, path: str, body: str = "") -> str:
-    message = timestamp + method.upper() + path + body
-    signature = hmac.new(
-        BITGET_API_SECRET.encode(),
-        message.encode(),
-        hashlib.sha256
-    ).digest()
-    return base64.b64encode(signature).decode()
+# ── Kraken helpers ─────────────────────────────────────────────────────────
+def _kraken_sign(urlpath: str, data: dict, secret: str) -> str:
+    postdata = urllib.parse.urlencode(data)
+    encoded = (str(data["nonce"]) + postdata).encode()
+    message = urlpath.encode() + hashlib.sha256(encoded).digest()
+    mac = hmac.new(base64.b64decode(secret), message, hashlib.sha512)
+    return base64.b64encode(mac.digest()).decode()
  
-def _bitget_headers(method: str, path: str, body: str = "") -> dict:
-    timestamp = str(int(time.time() * 1000))
+def _kraken_headers(urlpath: str, data: dict) -> dict:
     return {
-        "ACCESS-KEY": BITGET_API_KEY,
-        "ACCESS-SIGN": _bitget_sign(timestamp, method, path, body),
-        "ACCESS-TIMESTAMP": timestamp,
-        "ACCESS-PASSPHRASE": BITGET_PASSPHRASE,
-        "Content-Type": "application/json",
+        "API-Key": KRAKEN_API_KEY,
+        "API-Sign": _kraken_sign(urlpath, data, KRAKEN_API_SECRET),
+        "Content-Type": "application/x-www-form-urlencoded",
     }
  
-async def bitget_get(path: str, params: dict = None) -> dict:
-    query = ""
-    if params:
-        query = "?" + "&".join(f"{k}={v}" for k, v in params.items())
-    headers = _bitget_headers("GET", path + query)
+async def kraken_public(endpoint: str, params: dict = None) -> dict:
     async with httpx.AsyncClient() as client:
-        r = await client.get(f"{BITGET_BASE}{path}", params=params, headers=headers, timeout=10)
+        r = await client.get(f"{KRAKEN_BASE}/0/public/{endpoint}", params=params, timeout=10)
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+        if data.get("error"):
+            raise Exception(f"Kraken API error: {data['error']}")
+        return data["result"]
  
-async def bitget_post(path: str, body: dict) -> dict:
-    body_str = json.dumps(body)
-    headers = _bitget_headers("POST", path, body_str)
+async def kraken_private(endpoint: str, data: dict = None) -> dict:
+    if data is None:
+        data = {}
+    data["nonce"] = str(int(time.time() * 1000))
+    urlpath = f"/0/private/{endpoint}"
+    headers = _kraken_headers(urlpath, data)
     async with httpx.AsyncClient() as client:
-        r = await client.post(f"{BITGET_BASE}{path}", content=body_str, headers=headers, timeout=10)
+        r = await client.post(
+            f"{KRAKEN_BASE}{urlpath}",
+            data=data,
+            headers=headers,
+            timeout=10
+        )
         r.raise_for_status()
-        return r.json()
+        result = r.json()
+        if result.get("error"):
+            raise Exception(f"Kraken API error: {result['error']}")
+        return result["result"]
+ 
+# ── Converter símbolo para par Kraken ──────────────────────────────────────
+def to_kraken_pair(symbol: str) -> str:
+    # BTC/USDT → XBTUSD, ETH/USDT → ETHUSD, etc.
+    symbol = symbol.upper().replace("/", "").replace("USDT", "USD")
+    mapping = {
+        "BTCUSD": "XBTUSD",
+        "ETHUSD": "ETHUSD",
+        "SOLUSD": "SOLUSD",
+        "XRPUSD": "XRPUSD",
+        "ADAUSD": "ADAUSD",
+        "DOTUSD": "DOTUSD",
+    }
+    return mapping.get(symbol, symbol)
  
 # ── Lógica de risco ────────────────────────────────────────────────────────
 def check_risk(symbol: str, side: str, usdt_size: float) -> tuple[bool, str]:
@@ -112,11 +131,12 @@ def check_risk(symbol: str, side: str, usdt_size: float) -> tuple[bool, str]:
  
 # ── Executar ordem ─────────────────────────────────────────────────────────
 async def execute_order(signal: dict):
-    symbol   = signal["symbol"].upper().replace("/", "")  # BTC/USDT → BTCUSDT
-    action   = signal["action"].upper()
-    size_usd = float(signal.get("size_usd", MAX_POSITION_USDT))
+    symbol    = signal["symbol"].upper()
+    action    = signal["action"].upper()
+    size_usd  = float(signal.get("size_usd", MAX_POSITION_USDT))
+    kraken_pair = to_kraken_pair(symbol)
  
-    log.info(f"Sinal recebido: {action} {symbol} ${size_usd}")
+    log.info(f"Sinal recebido: {action} {symbol} (${size_usd})")
  
     if PAPER_TRADING:
         trade = {
@@ -159,21 +179,18 @@ async def execute_order(signal: dict):
  
     try:
         # Obtém preço actual
-        ticker = await bitget_get(f"/api/v2/mix/market/ticker", {"symbol": symbol + "_UMCBL", "productType": "umcbl"})
-        price = float(ticker["data"][0]["lastPr"])
-        quantity = round(size_usd / price, 3)
+        ticker = await kraken_public("Ticker", {"pair": kraken_pair})
+        price = float(list(ticker.values())[0]["c"][0])
+        volume = round(size_usd / price, 6)
  
-        side_bitget = "buy" if action == "BUY" else "sell"
-        result = await bitget_post("/api/v2/mix/order/place-order", {
-            "symbol": symbol + "_UMCBL",
-            "productType": "umcbl",
-            "marginMode": "isolated",
-            "marginCoin": "USDT",
-            "size": str(quantity),
-            "side": side_bitget,
-            "orderType": "market",
+        kraken_side = "buy" if action == "BUY" else "sell"
+        result = await kraken_private("AddOrder", {
+            "pair": kraken_pair,
+            "type": kraken_side,
+            "ordertype": "market",
+            "volume": str(volume),
         })
-        log.info(f"Ordem executada na Bitget: {result}")
+        log.info(f"Ordem executada na Kraken: {result}")
         return result
  
     except Exception as e:
@@ -188,8 +205,9 @@ async def refresh_positions():
         return
     try:
         for symbol, pos in state["positions"].items():
-            ticker = await bitget_get(f"/api/v2/mix/market/ticker", {"symbol": symbol + "_UMCBL", "productType": "umcbl"})
-            pos["current_price"] = float(ticker["data"][0]["lastPr"])
+            kraken_pair = to_kraken_pair(symbol)
+            ticker = await kraken_public("Ticker", {"pair": kraken_pair})
+            pos["current_price"] = float(list(ticker.values())[0]["c"][0])
             if pos["entry_price"] > 0:
                 pct = (pos["current_price"] - pos["entry_price"]) / pos["entry_price"]
                 if pos["side"] == "SELL":
@@ -201,7 +219,7 @@ async def refresh_positions():
 # ── FastAPI app ─────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    log.info(f"TradeBot iniciado | Paper trading: {PAPER_TRADING}")
+    log.info(f"TradeBot iniciado | Paper trading: {PAPER_TRADING} | Exchange: Kraken")
     asyncio.create_task(run_signal_loop(state))
     yield
  
@@ -243,7 +261,7 @@ async def api_status():
     await refresh_positions()
     return {
         "paper_trading": PAPER_TRADING,
-        "exchange": "Bitget",
+        "exchange": "Kraken",
         "started_at": state["started_at"],
         "balance_usdt": state["balance_usdt"],
         "total_pnl": state["total_pnl"],
