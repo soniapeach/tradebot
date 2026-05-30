@@ -26,7 +26,6 @@
   @keyframes pulse{0%,100%{box-shadow:0 0 0 0 #00e5a055}50%{box-shadow:0 0 0 5px #00e5a000}}
   .paper-badge{background:#f5a62320;color:var(--amber);border:1px solid #f5a62340;padding:3px 10px;border-radius:20px;font-size:10px;font-family:var(--font-mono);font-weight:700;letter-spacing:.05em}
 
-  /* Ticker bar */
   .ticker-bar{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 16px;margin-bottom:14px;display:flex;align-items:center;gap:24px;overflow-x:auto;scrollbar-width:none}
   .ticker-bar::-webkit-scrollbar{display:none}
   .ticker-item{display:flex;align-items:center;gap:10px;flex-shrink:0}
@@ -217,7 +216,6 @@
 
 <script>
 const BASE = window.location.origin;
-let signals_seen = 0;
 
 // Clock
 setInterval(() => {
@@ -227,21 +225,19 @@ setInterval(() => {
 // Webhook URL
 document.getElementById('webhook-url').textContent = BASE + '/webhook';
 
-// Formata timestamp
 function fmtTs(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
   return d.toLocaleTimeString('pt-PT', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
 }
 
-// Fetch status
 async function fetchStatus() {
   try {
     const r = await fetch(BASE + '/api/status');
     const d = await r.json();
 
     document.getElementById('status-dot').className = 'dot';
-    document.getElementById('status-text').textContent = 'Bitget  ' + (d.paper_trading ? 'Testnet' : 'Mainnet');
+    document.getElementById('status-text').textContent = 'Kraken ' + (d.paper_trading ? 'Testnet' : 'Live');
 
     if (d.paper_trading) {
       document.getElementById('paper-badge').style.display = 'inline';
@@ -254,7 +250,6 @@ async function fetchStatus() {
     document.getElementById('kpi-positions').textContent = d.open_positions || 0;
     document.getElementById('kpi-trades').textContent = d.total_trades || 0;
 
-    // Erros
     if (d.errors && d.errors.length > 0) {
       document.getElementById('errors-panel').style.display = 'block';
       document.getElementById('errors-wrap').innerHTML = d.errors.map(e =>
@@ -267,12 +262,10 @@ async function fetchStatus() {
   }
 }
 
-// Fetch positions
 async function fetchPositions() {
   try {
     const r = await fetch(BASE + '/api/positions');
     const positions = await r.json();
-
     const wrap = document.getElementById('positions-wrap');
     document.getElementById('kpi-positions').textContent = positions.length;
 
@@ -303,12 +296,10 @@ async function fetchPositions() {
   } catch(e) { console.error('positions:', e); }
 }
 
-// Fetch signals
 async function fetchSignals() {
   try {
     const r = await fetch(BASE + '/api/signals');
     const signals = await r.json();
-
     document.getElementById('kpi-signals').textContent = signals.length;
     const feed = document.getElementById('signal-feed');
 
@@ -328,12 +319,10 @@ async function fetchSignals() {
   } catch(e) { console.error('signals:', e); }
 }
 
-// Fetch trades
 async function fetchTrades() {
   try {
     const r = await fetch(BASE + '/api/trades');
     const trades = await r.json();
-
     document.getElementById('trades-count').textContent = `${trades.length} trades`;
     const wrap = document.getElementById('trades-wrap');
 
@@ -356,14 +345,12 @@ async function fetchTrades() {
   } catch(e) { console.error('trades:', e); }
 }
 
-// ── Ticker bar ─────────────────────────────────────────
-const tickerPrev = {};
-
+// ── Ticker — Kraken public API ─────────────────────────────────────────────
 function setTicker(id, price, change) {
   const el = document.getElementById('t-' + id);
   const cel = document.getElementById('tc-' + id);
   if (!el || !cel) return;
-  const fmt = price < 10 ? price.toFixed(4) : price < 1000 ? price.toFixed(2) : price.toLocaleString('en-US', {maximumFractionDigits: 0});
+  const fmt = price < 10 ? price.toFixed(4) : price < 1000 ? price.toFixed(2) : price.toLocaleString('en-US', {maximumFractionDigits:0});
   el.textContent = price < 10 ? fmt : '$' + fmt;
   const up = change >= 0;
   cel.textContent = (up ? '+' : '') + change.toFixed(2) + '%';
@@ -372,38 +359,34 @@ function setTicker(id, price, change) {
 
 async function fetchTicker() {
   try {
-    // Cripto via Bitget public API
-    const cryptos = [
-      {id: 'btc', symbol: 'BTCUSDT'},
-      {id: 'eth', symbol: 'ETHUSDT'},
-      {id: 'sol', symbol: 'SOLUSDT'},
-    ];
-    for (const c of cryptos) {
-      const r = await fetch(`https://api.bitget.com/api/v2/mix/market/ticker?symbol=${c.symbol}&productType=USDT-FUTURES`);
-      const d = await r.json();
-      if (d.code === '00000' && d.data?.length) {
-        const price  = parseFloat(d.data[0].lastPr);
-        const open   = parseFloat(d.data[0].openUtc0 || d.data[0].open24h || price);
-        const change = open ? ((price - open) / open * 100) : 0;
-        setTicker(c.id, price, change);
-      }
+    // Kraken public API
+    const pairs = {btc:'XBTUSD', eth:'ETHUSD', sol:'SOLUSD'};
+    for (const [id, pair] of Object.entries(pairs)) {
+      try {
+        const r = await fetch(`https://api.kraken.com/0/public/Ticker?pair=${pair}`);
+        const d = await r.json();
+        if (!d.error?.length && d.result) {
+          const data = Object.values(d.result)[0];
+          const price = parseFloat(data.c[0]);       // last trade price
+          const open  = parseFloat(data.o);           // today's opening price
+          const change = open ? ((price - open) / open * 100) : 0;
+          setTicker(id, price, change);
+        }
+      } catch(e) { console.error('ticker ' + id, e); }
     }
-    // EUR/USD e GBP/USD via API pública gratuita
+    // EUR/USD e GBP/USD
     const fx = await fetch('https://open.er-api.com/v6/latest/USD');
     const fxd = await fx.json();
     if (fxd.rates) {
-      const eur = 1 / fxd.rates.EUR;
-      const gbp = 1 / fxd.rates.GBP;
-      setTicker('eur', eur, 0);
-      setTicker('gbp', gbp, 0);
+      setTicker('eur', 1 / fxd.rates.EUR, 0);
+      setTicker('gbp', 1 / fxd.rates.GBP, 0);
     }
   } catch(e) { console.error('ticker:', e); }
 }
 
 fetchTicker();
-setInterval(fetchTicker, 15000); // actualiza a cada 15 segundos
+setInterval(fetchTicker, 15000);
 
-// Polling
 async function refresh() {
   await Promise.all([fetchStatus(), fetchPositions(), fetchSignals(), fetchTrades()]);
 }
